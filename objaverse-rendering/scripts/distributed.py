@@ -13,6 +13,10 @@ import tyro
 import wandb
 import math
 
+OUTPUT_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__file__))),
+                          "zero123/views_whole_sphere")
+print(OUTPUT_DIR)
+
 
 @dataclass
 class Args:
@@ -43,7 +47,7 @@ def worker(
         if item is None:
             break
 
-        view_path = os.path.join('.objaverse/hf-objaverse-v1/views_whole_sphere', item.split('/')[-1][:-4])
+        view_path = os.path.join(OUTPUT_DIR, item.split('/')[-1][:-4])
         if os.path.exists(view_path):
             queue.task_done()
             print('========', item, 'rendered', '========')
@@ -58,7 +62,7 @@ def worker(
             # f" GOMP_CPU_AFFINITY='0-47' OMP_NUM_THREADS=48 OMP_SCHEDULE=STATIC OMP_PROC_BIND=CLOSE "
             f" CUDA_VISIBLE_DEVICES={gpu} "
             f" blender-3.2.2-linux-x64/blender -b -P scripts/blender_script.py --"
-            f" --object_path {item}"
+            f" --object_path {item} --output_dir '{OUTPUT_DIR}'"  
         )
         print(command)
         subprocess.run(command, shell=True)
@@ -93,10 +97,9 @@ if __name__ == "__main__":
     with open(args.input_models_path, "r") as f:
         model_paths = json.load(f)
 
-    model_keys = list(model_paths.keys())
 
-    for item in model_keys:
-        queue.put(os.path.join('.objaverse/hf-objaverse-v1', model_paths[item]))
+    for item in model_paths.values():
+        queue.put(item)
 
     # update the wandb count
     if args.log_to_wandb:
@@ -114,6 +117,13 @@ if __name__ == "__main__":
 
     # Wait for all tasks to be completed
     queue.join()
+
+    # Write valid_paths.json to be consumed by zero-123's data loader
+    outputs = []
+    for d in glob.glob(os.path.join(OUTPUT_DIR, '*/')):
+        outputs.append(d)
+    with open(os.path.join(OUTPUT_DIR, 'valid_paths.json'), 'w') as f:
+        json.dump(outputs, f, indent=2)
 
     # Add sentinels to the queue to stop the worker processes
     for i in range(args.num_gpus * args.workers_per_gpu):
